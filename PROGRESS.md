@@ -22,6 +22,9 @@ Inżynier QA / Tester: `@Pdf Tester`
 | **M8** | Znaki wodne, Numeracja stron i Podpis Canvas/PNG | 🟢 Zatwierdzone przez QA | `@Pdf Tester` | [x] Sukces (build 0, tsc 0) | [x] Sukces (watermark qpdf OK, page-num 1-5 OK, sign canvas qpdf OK, UI OK) |
 | **M9** | OCR (Tesseract.js PL/EN) i Wizualny Diff dokumentów | 🟢 Zatwierdzone przez QA | `@Pdf Tester` | [x] Sukces (build 0, tsc 0) | [x] Sukces (OCR pol 94% OK, DOCX/PDF zip/qpdf OK, diff 12%/100% OK, UI OK) |
 | **M10** | Kolejka wsadowa Batch, Skróty, UX & Audyt E2E | 🟢 Zatwierdzone przez QA | `@Pdf Tester` | [x] Sukces (build 0, tsc 0) | [x] Sukces (10/10 PASSED verify-all.ts, batch ZIP OK, skróty OK, UI OK) |
+| **M11** | Interaktywne Formularze PDF (AcroForms: edycja, import/export JSON, flattening) | ⚪ Oczekuje | `@Pdf Developer` | [ ] Do weryfikacji | [ ] Do weryfikacji |
+| **M12** | Narzędzia Adnotacji i Bezpieczna Redakcja Trwała (True Redaction RODO, kształty) | ⚪ Oczekuje | `@Pdf Developer` | [ ] Do weryfikacji | [ ] Do weryfikacji |
+| **M13** | Archiwizacja PDF/A (1b/2b/3b), Załączniki (Embedded Files) i Preflight Inspector | ⚪ Oczekuje | `@Pdf Developer` | [ ] Do weryfikacji | [ ] Do weryfikacji |
 
 Legenda statusu:
 - ⚪ Oczekuje
@@ -275,6 +278,95 @@ Legenda statusu:
 
 ---
 
+### [ ] M11: Interaktywne Formularze PDF (AcroForms – Inspekcja, Wypełnianie, Eksport/Import JSON i Flattening)
+- **Cel:** Pełna obsługa interaktywnych formularzy PDF (AcroForms): inspekcja istniejących pól, edycja i wypełnianie wartości w UI, import/eksport danych do JSON oraz trwałe spłaszczanie (form flattening).
+- **Zadania @Pdf Developer:**
+  1. API Routes:
+     - `POST /api/pdf/forms/inspect`:
+       - Przyjmuje plik PDF.
+       - Zwraca listę wykrytych pól: `name`, `type` (`text` | `checkbox` | `radio` | `dropdown` | `button`), `value`, `options` (dla dropdown/radio), `readOnly`, `required`.
+     - `POST /api/pdf/forms/fill`:
+       - Przyjmuje plik PDF, mapę wartości pól `{ [fieldName: string]: string | boolean }` oraz flagę `flatten?: boolean`.
+       - Wypełnia pola formularza za pomocą `pdf-lib` Form API (`getTextField`, `getCheckBox`, `getDropdown`, `getRadioGroup`).
+       - Opcjonalnie wywołuje `form.flatten()` (zamienia pola interaktywne na statyczny tekst/grafikę w PDF).
+       - Zwraca zmodyfikowany/spłaszczony plik PDF jako strumień binarny.
+  2. Komponent UI `src/components/tools/FormsTool.tsx`:
+     - Zakładka "Wypełnianie Formularza": dynamiczny formularz generowany z wykrytych pól PDF (inputy, checkboxy, selecty).
+     - Zakładka "Import / Eksport JSON": pobieranie wypełnionych wartości jako plik `.json` oraz wczytywanie pliku `.json` do automatycznego wypełnienia formularza.
+     - Przełącznik "Spłaszcz formularz (zabezpiecz przed dalszą modyfikacją pól)".
+     - Integracja w `Workspace.tsx`, `Sidebar.tsx` oraz `CommandSearch.tsx`.
+  3. Generator pliku testowego w `scripts/generate-fixtures.ts`:
+     - Generowanie `fixtures/sample-form.pdf` zawierającego pola: `imie_nazwisko`, `email`, `zgoda_rodo` (checkbox), `kraj` (dropdown z opcjami PL/EN/DE).
+  4. Skrypt testowy `scripts/test-m11-forms.ts`:
+     - Test 1: Inspekcja `sample-form.pdf` i weryfikacja wykrycia wszystkich pól.
+     - Test 2: Wypełnienie formularza danymi testowymi i weryfikacja zapisu.
+     - Test 3: Weryfikacja spłaszczenia `flatten()` (ponowna inspekcja zwraca 0 aktywnych pól).
+     - Test 4: Walidacja binarna pliku wynikowego przez `qpdf --check`.
+- **Kryteria Akceptacji M11:**
+  - `sample-form.pdf` generuje się bezbłędnie i zawiera interaktywne pola.
+  - Endpoint `/api/pdf/forms/inspect` poprawnie listuje wszystkie pola i ich typy.
+  - Endpoint `/api/pdf/forms/fill` bezbłędnie zapisuje wartości i przy `flatten: true` spłaszcza dokument.
+  - `npm run build` i `npx tsc --noEmit` kończą się kodem 0.
+
+---
+
+### [ ] M12: Narzędzia Adnotacji i Bezpieczna Redakcja Trwała (True Redaction RODO/GDPR)
+- **Cel:** Wzbogacanie dokumentów o adnotacje wizualne (zakreślacze, kształty, notatki) oraz trwała, nieodwracalna redakcja (usuwanie danych wrażliwych RODO/GDPR z fizycznym niszczeniem warstwy tekstowej).
+- **Zadania @Pdf Developer:**
+  1. API Routes:
+     - `POST /api/pdf/annotate`:
+       - Przyjmuje plik PDF oraz listę adnotacji: `{ pageIndex: number, type: 'highlight' | 'rect' | 'arrow' | 'note', x: number, y: number, width: number, height: number, color: string, opacity: number, text?: string }`.
+       - Nanosi elementy wektorowe na wskazanych stronach za pomocą `pdf-lib`.
+     - `POST /api/pdf/redact`:
+       - Przyjmuje plik PDF oraz listę obszarów do zaczernienia: `{ pageIndex: number, x: number, y: number, width: number, height: number }` lub wzorce tekstowe/regexy (np. PESEL, NIP, e-mail).
+       - Realizuje **True Redaction**: nanosi nieprzezroczysty czarny prostokąt i fizycznie niszczy/usuwa warstwę tekstową pod redagowanym obszarem, gwarantując, że tekst nie może być skopiowany ani odczytany przez `pdftotext`.
+  2. Komponent UI `src/components/tools/AnnotateRedactTool.tsx`:
+     - Tryb "Adnotacje i Zakreślanie": narzędzia zakreślacza, prostokąta, strzałki i notatki tekstowej na Canvasie.
+     - Tryb "Trwała Redakcja RODO": interaktywne zaznaczanie obszaru ramką lub szybkie maskowanie regułami.
+     - Wyraźne ostrzeżenie o nieodwracalnym usunięciu danych przed zastosowaniem redakcji.
+     - Integracja w `Workspace.tsx`, `Sidebar.tsx` oraz `CommandSearch.tsx`.
+  3. Skrypt testowy `scripts/test-m12-redact.ts`:
+     - Test 1: Nanoszenie adnotacji i kształtów (qpdf --check kod 0).
+     - Test 2: Nanoszenie trwałej redakcji na wskazany fragment tekstu.
+     - Test 3: Weryfikacja bezpieczeństwa – `pdftotext` potwierdza brak zredagowanego tekstu w pliku wynikowym.
+- **Kryteria Akceptacji M12:**
+  - Nanoszenie adnotacji nie narusza struktury PDF (`qpdf --check` kod 0).
+  - Trwała redakcja całkowicie usuwa tekst pod zaczernionym prostokątem (`pdftotext` zwraca brak wystąpień tekstu).
+  - `npm run build` i `npx tsc --noEmit` kończą się kodem 0.
+
+---
+
+### [ ] M13: Standard Archiwizacyjny PDF/A, Zarządzanie Załącznikami (Embedded Files) i Raport Preflight
+- **Cel:** Obsługa międzynarodowego standardu archiwizacji cyfrowej PDF/A (walidacja i konwersja), zarządzanie załącznikami binarnymi wewnątrz PDF (np. e-faktury KSeF / Factur-X / ZUGFeRD) oraz szczegółowa analiza techniczna struktury dokumentu (Preflight Inspector).
+- **Zadania @Pdf Developer:**
+  1. API Routes:
+     - `POST /api/pdf/pdfa`:
+       - Przyjmuje plik PDF oraz docelowy poziom zgodności: `PDF/A-1b`, `PDF/A-2b` lub `PDF/A-3b`.
+       - Dokonuje konwersji za pomocą Ghostscript (`-dPDFA=...`, profil barwny sRGB ICC, osadzenie fontów i metadane XMP).
+     - `POST /api/pdf/attachments/extract`:
+       - Skanuje drzewo `/EmbeddedFiles` w PDF i wyodrębnia wszystkie osadzone pliki binarne (XML, CSV, DOCX, obrazy) do archiwum ZIP.
+     - `POST /api/pdf/attachments/embed`:
+       - Dołącza plik binarny (np. `faktura-ksef.xml`) do wskazanego PDF w strukturze `/Names /EmbeddedFiles` zgodnie ze standardem PDF/A-3.
+     - `POST /api/pdf/preflight`:
+       - Przeprowadza pełną inspekcję struktury PDF: wersja PDF (1.3-2.0), status linearyzacji, liczba stron, lista czcionek (Type1, TrueType, osadzona vs nieosadzona), obecność formularzy, podpisów, strumieni XMP, adnotacji oraz status zgodności z PDF/A.
+  2. Komponent UI `src/components/tools/PdfaAttachmentsTool.tsx`:
+     - Zakładka "Konwersja PDF/A": wybór profilu (1b, 2b, 3b) z opisem przeznaczenia archiwizacyjnego.
+     - Zakładka "Załączniki dokumentu": lista wykrytych załączników z możliwością pobrania oraz strefa dodania nowego pliku osadzonego w PDF.
+     - Zakładka "Raport Preflight": czytelny panel audytu technicznego z możliwością pobrania raportu JSON.
+     - Integracja w `Workspace.tsx`, `Sidebar.tsx` oraz `CommandSearch.tsx`.
+  3. Skrypt testowy `scripts/test-m13-pdfa.ts`:
+     - Test 1: Konwersja do PDF/A i weryfikacja nagłówków XMP/pdfinfo.
+     - Test 2: Osadzenie załącznika XML w PDF i weryfikacja integralności.
+     - Test 3: Ekstrakcja załącznika i porównanie sumy kontrolnej SHA-256 z oryginałem.
+     - Test 4: Inspekcja Preflight na plikach testowych.
+- **Kryteria Akceptacji M13:**
+  - Konwertowany plik spełnia wymogi profilu PDF/A (potwierdzone przez `pdfinfo` i metadane XMP).
+  - Osadzony załącznik zostaje bezbłędnie wyekstrahowany z identyczną sumą SHA-256.
+  - Endpoint `/api/pdf/preflight` zwraca kompletny raport techniczny JSON.
+  - `npm run build` i `npx tsc --noEmit` kończą się kodem 0.
+
+---
+
 ## 🔄 Dziennik Przekazywania Prac (Handover Log)
 
 | Data i Czas | Od kogo | Do kogo | Zakres przekazania / Komunikat |
@@ -302,3 +394,4 @@ Legenda statusu:
 | 2026-11-21 17:30 | `@Pdf Tester` | `@Pdf Developer` | Weryfikacja QA kamienia M9 zakończona 100% sukcesem: API (/api/ocr/process i /api/diff/compare) przetestowane binarnie w test-m9-ocr-diff.ts (6/6 PASSED): silnik Tesseract.js rozpoznał tekst ze skanu sample-scanned.png z dokładnością 94% i prawidłowymi polskimi znakami diakrytycznymi ('Zażółć gęślą jaźń'), wygenerowano poprawny plik DOCX (9.8 KB, zip OK) oraz PDF (qpdf --check kod 0), porównywarka diff prawidłowo wyliczyła wskaźniki podobieństwa (12% dla PDF vs DOCX, 100% dla identycznych, 70% dla zmian tekstu). Weryfikacja UI we wbudowanej przeglądarce: OcrTool bezbłędnie przeprowadził OCR, wyrenderował podgląd tekstu z metrykami i pobrał sample-scanned-ocr.docx; DiffTool załadował parę plików testowych, poprawnie zaprezentował widoki Side-by-Side i Unified Diff oraz wyeksportował raport różnic raport-diff.txt. Wszystkie pliki przeszły weryfikację integralności. Konsola przeglądarki 0 błędów. Port 3000 zwolniony. M9 zatwierdzone. Przekazano zadanie M10 (Kolejka wsadowa Batch, Globalne skróty Ctrl+K/Ctrl+O, Dopieszczenie UX i audyt końcowy verify-all.ts) do realizacji. |
 | 2026-11-21 17:38 | `@Pdf Developer` | `@Pdf Tester` | Zrealizowano finałowy kamień milowy M10 (Kolejka wsadowa Batch, Skróty, UX i Audyt Końcowy E2E): komponent BatchQueue z masowym wgrywaniem do 20 plików, 4 masowymi akcjami (kompresja, DOCX->PDF, znak wodny, sanityzacja) i eksportem do ZIP; trasa API /api/batch/process z nagłówkami X-Total-Files i X-Success-Count; system powiadomień toast (ToastContext) w stylu Dark Mode z walidacją 100MB; globalne skróty klawiszowe (Ctrl+K, Ctrl+O, Ctrl+Enter, Esc); responsywny drawer nawigacyjny na urządzeniach mobilnych (375px - 4K); master skrypt audytu E2E scripts/verify-all.ts testujący wszystkie 10 modułów (M1-M10) zakończony wynikiem 10/10 PASSED i kodem wyjścia 0. Sprzątanie /tmp/docuforge-studio/ w 100% skuteczne. npm run build i npx tsc --noEmit kod 0. Przekazano do finalnego audytu QA. |
 | 2026-11-21 17:45 | `@Pdf Tester` | `@Pdf Architekt` | Finałowy audyt QA kamienia M10 oraz całego systemu DocuForge Studio zakończony 100% sukcesem (10/10 MODUŁÓW ZATWIERDZONYCH [x]). Weryfikacja binarna API /api/batch/process: nagłówki X-Total-Files: 2, X-Success-Count: 2, poprawna paczka ZIP (unzip -t kod 0, qpdf --check bez błędów). Skrypt całościowego audytu scripts/verify-all.ts: 10/10 modułów (M1-M10) ze statusem PASSED i kodem wyjścia 0. Weryfikacja UI we wbudowanej przeglądarce: BatchQueue przetestowany na 3 plikach z akcją dodawania znaku wodnego i pobraniem paczki ZIP (25.5 KB, 3 pliki sprawne); globalne skróty klawiszowe (Ctrl+K otwiera wyszukiwarkę, Esc zamyka, Ctrl+Enter uruchamia przetwarzanie); system powiadomień Toast oraz responsywne menu mobilne. Konsola przeglądarki 0 błędów diagnostycznych. npm run build i npx tsc --noEmit bezbłędne (kod 0, 23 trasy). Środowisko czyste, port 3000 zwolniony. Przekazano kompletny system do finalnego podsumowania przez @Pdf Architekt. |
+| 2026-11-21 22:45 | `@Pdf Architekt` | `@Pdf Developer` | Zaplanowano 3 kolejne kamienie milowe (M11: AcroForms, M12: Adnotacje i True Redaction, M13: PDF/A i Preflight) w ARCHITECTURE.md oraz PROGRESS.md. Przekazuję do realizacji **Kamień Milowy M11** (AcroForms: inspekcja pól, wypełnianie, eksport/import JSON, flattening). |

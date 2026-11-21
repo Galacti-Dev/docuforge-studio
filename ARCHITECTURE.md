@@ -280,6 +280,70 @@ Wszystkie endpointy obsługują przesyłanie formularzy `multipart/form-data` i 
   }
   ```
 
+### 4.12 `/api/pdf/forms/inspect` & `/api/pdf/forms/fill`
+- **Inspect:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file`.
+  - **Odpowiedź:** JSON z listą wykrytych pól:
+    ```typescript
+    interface FormFieldInfo {
+      name: string;
+      type: 'text' | 'checkbox' | 'radio' | 'dropdown' | 'button' | 'unknown';
+      value: string | boolean;
+      options?: string[];
+      readOnly: boolean;
+      required: boolean;
+    }
+    ```
+- **Fill:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file`, `data` (JSON ciąg `{ [key: string]: string | boolean }`) oraz `flatten` (`"true"` | `"false"`).
+  - **Mechanizm:** `pdf-lib` Form API (`PDFDocument.load(buffer).getForm()`), iteracja i wypełnianie pól, opcjonalnie `form.flatten()`.
+  - **Odpowiedź:** Strumień binarny `application/pdf`.
+
+### 4.13 `/api/pdf/annotate` & `/api/pdf/redact`
+- **Annotate:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file` i `annotations` (JSON array):
+    ```typescript
+    interface AnnotationItem {
+      pageIndex: number;
+      type: 'highlight' | 'rect' | 'arrow' | 'note';
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      color: string;
+      opacity: number;
+      text?: string;
+    }
+    ```
+  - **Odpowiedź:** `application/pdf` z naniesionymi obiektami wektorowymi `pdf-lib`.
+- **Redact (True Redaction RODO/GDPR):**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file` oraz `areas` (JSON array: `{ pageIndex, x, y, width, height }`) lub `patterns` (JSON array: reguły maskowania).
+  - **Mechanizm:** Trwałe nałożenie czarnego wektora oraz fizyczne zniszczenie warstwy tekstowej pod obszarem redakcji, aby `pdftotext` nie był w stanie wydobyć usuniętych słów.
+  - **Odpowiedź:** `application/pdf`.
+
+### 4.14 `/api/pdf/pdfa`, `/api/pdf/attachments/extract`, `/api/pdf/attachments/embed`, `/api/pdf/preflight`
+- **PDF/A:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file` i `conformance` (`"1b"` | `"2b"` | `"3b"`).
+  - **Mechanizm:** Ghostscript `/usr/bin/gs -dPDFA=... -sColorConversionStrategy=UseDeviceIndependentColor -sOutputICCProfile=default_rgb.icc ...`.
+  - **Odpowiedź:** `application/pdf`.
+- **Attachments Extract:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file`.
+  - **Odpowiedź:** `application/zip` ze wszystkimi wyciągniętymi plikami z `/Names /EmbeddedFiles`.
+- **Attachments Embed:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `pdf` oraz załączanym plikiem binarnym `attachment`.
+  - **Mechanizm:** Tworzenie wpisu `/EmbeddedFiles` w katalogu głównym PDF (PDF/A-3 compliant).
+- **Preflight Inspector:**
+  - **Metoda:** `POST`
+  - **Body:** `FormData` z plikiem `file`.
+  - **Odpowiedź:** JSON ze szczegółową analizą techniczną dokumentu (wersja PDF, szyfrowanie, linearyzacja, czcionki, metadane XMP, liczba stron, profil zgodności).
+
 ---
 
 ## 5. Standardy Kodowania dla @Pdf Developer
@@ -296,3 +360,24 @@ Wszystkie endpointy obsługują przesyłanie formularzy `multipart/form-data` i 
    - Po każdym etapie uruchomić:
      `npm run build && npx tsc --noEmit`.
    - Żadne błędy lintera ani kompilatora TypeScript nie mogą pozostać w kodzie.
+
+---
+
+## 6. Specyfikacja Nowych Modułów M11–M13
+
+### 6.1 M11: Formularze PDF (AcroForms)
+- Moduł `src/components/tools/FormsTool.tsx`.
+- Obsługa standardowych typów pól formularzy: pola tekstowe, checkboxy, radio group, dropdowny.
+- Możliwość importu i eksportu danych formularza do ustrukturyzowanego formatu JSON.
+- Opcja trwałego spłaszczania (`flatten()`), która uniemożliwia dalszą edycję wartości pól.
+
+### 6.2 M12: Adnotacje i Bezpieczna Redakcja Trwała
+- Moduł `src/components/tools/AnnotateRedactTool.tsx`.
+- Wektorowe rysowanie kształtów (zakreślacz, prostokąt, strzałka, notatki tekstowe).
+- Trwała redakcja danych wrażliwych RODO/GDPR z fizycznym usunięciem wektorów tekstu/obrazów pod zaznaczonym obszarem (potwierdzona testem `pdftotext`).
+
+### 6.3 M13: PDF/A, Załączniki i Raport Preflight
+- Moduł `src/components/tools/PdfaAttachmentsTool.tsx`.
+- Konwersja do profilu archiwalnego PDF/A (1b/2b/3b).
+- Obsługa załączników w formacie PDF/A-3 (np. faktury ustrukturyzowane XML / KSeF / Factur-X / ZUGFeRD).
+- Szczegółowa analiza techniczna struktury pliku (wersja, fonty, profile kolorów, bezpieczeństwo).
